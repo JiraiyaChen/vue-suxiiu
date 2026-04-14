@@ -1,21 +1,27 @@
 <script setup>
 import { onMounted, onBeforeUnmount, ref } from 'vue';
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import pxUrl from '../assets/px.png';
+import nxUrl from '../assets/nx.png';
+import pyUrl from '../assets/py.png';
+import nyUrl from '../assets/ny.png';
+import pzUrl from '../assets/pz.png';
+import nzUrl from '../assets/nz.png';
 
 const canvasRef = ref(null);
 let renderer, animationId;
 
 onMounted(() => {
-  const width = canvasRef.value.clientWidth;
-  const height = canvasRef.value.clientHeight;
+  const width = window.innerWidth;
+  const height = window.innerHeight;
 
   // 场景
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1a1a2e);
 
-  // 相机
-  const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
-  camera.position.set(0, 1.5, 5);
+  // 相机 —— 偏离原点，避免与 target 重合导致 OrbitControls 旋转失效
+  const camera = new THREE.PerspectiveCamera(110, width / height, 1, 2000000);
+  camera.position.set(0, 0, 100);
 
   // 渲染器
   renderer = new THREE.WebGLRenderer({
@@ -24,70 +30,58 @@ onMounted(() => {
   });
   renderer.setSize(width, height);
   renderer.setPixelRatio(window.devicePixelRatio);
-  renderer.shadowMap.enabled = true;
 
-  // 环境光
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-  scene.add(ambientLight);
+  // 全景拖拽控制
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 0, 0);
+  controls.enableZoom = true;
+  controls.enablePan = true;
+  controls.panSpeed = 500;
+  controls.zoomSpeed = 300;
+  controls.rotateSpeed = 0.5;
+  controls.minDistance = 10;
+  controls.maxDistance = 150000;
+  controls.minPolarAngle = 0.05;
+  controls.maxPolarAngle = Math.PI - 0.05;
 
-  // 点光源
-  const pointLight = new THREE.PointLight(0x00d4ff, 120, 20);
-  pointLight.position.set(3, 4, 3);
-  pointLight.castShadow = true;
-  scene.add(pointLight);
+  // 超大物理空间盒（500000 单位边长），内壁贴图，有真实体积感
+  const texLoader = new THREE.TextureLoader();
+  const skyMaterials = [
+    new THREE.MeshBasicMaterial({
+      map: texLoader.load(pxUrl),
+      side: THREE.BackSide,
+    }), // px 右
+    new THREE.MeshBasicMaterial({
+      map: texLoader.load(nxUrl),
+      side: THREE.BackSide,
+    }), // nx 左
+    new THREE.MeshBasicMaterial({
+      map: texLoader.load(pyUrl),
+      side: THREE.BackSide,
+    }), // py 上
+    new THREE.MeshBasicMaterial({
+      map: texLoader.load(nyUrl),
+      side: THREE.BackSide,
+    }), // ny 下
+    new THREE.MeshBasicMaterial({
+      map: texLoader.load(pzUrl),
+      side: THREE.BackSide,
+    }), // pz 前
+    new THREE.MeshBasicMaterial({
+      map: texLoader.load(nzUrl),
+      side: THREE.BackSide,
+    }), // nz 后
+  ];
+  const skyBox = new THREE.Mesh(
+    new THREE.BoxGeometry(500000, 500000, 500000),
+    skyMaterials
+  );
+  scene.add(skyBox);
 
-  // 地面
-  const planeGeo = new THREE.PlaneGeometry(12, 12);
-  const planeMat = new THREE.MeshStandardMaterial({ color: 0x16213e });
-  const plane = new THREE.Mesh(planeGeo, planeMat);
-  plane.rotation.x = -Math.PI / 2;
-  plane.receiveShadow = true;
-  scene.add(plane);
-
-  // 中心立方体
-  const boxGeo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-  const boxMat = new THREE.MeshStandardMaterial({
-    color: 0x0f3460,
-    metalness: 0.5,
-    roughness: 0.3,
-  });
-  const box = new THREE.Mesh(boxGeo, boxMat);
-  box.position.set(0, 0.6, 0);
-  box.castShadow = true;
-  scene.add(box);
-
-  // 球体
-  const sphereGeo = new THREE.SphereGeometry(0.6, 32, 32);
-  const sphereMat = new THREE.MeshStandardMaterial({
-    color: 0xe94560,
-    metalness: 0.3,
-    roughness: 0.4,
-  });
-  const sphere = new THREE.Mesh(sphereGeo, sphereMat);
-  sphere.position.set(2.2, 0.6, 0);
-  sphere.castShadow = true;
-  scene.add(sphere);
-
-  // 圆环
-  const torusGeo = new THREE.TorusGeometry(0.5, 0.18, 16, 60);
-  const torusMat = new THREE.MeshStandardMaterial({
-    color: 0x00d4ff,
-    metalness: 0.6,
-    roughness: 0.2,
-  });
-  const torus = new THREE.Mesh(torusGeo, torusMat);
-  torus.position.set(-2.2, 0.7, 0);
-  torus.castShadow = true;
-  scene.add(torus);
-
-  // 网格辅助线
-  const gridHelper = new THREE.GridHelper(12, 12, 0x333355, 0x222244);
-  scene.add(gridHelper);
-
-  // 响应式窗口大小
+  // 响应式窗口
   const onResize = () => {
-    const w = canvasRef.value.clientWidth;
-    const h = canvasRef.value.clientHeight;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
@@ -95,22 +89,9 @@ onMounted(() => {
   window.addEventListener('resize', onResize);
 
   // 动画循环
-  const clock = new THREE.Clock();
   const animate = () => {
     animationId = requestAnimationFrame(animate);
-    const t = clock.getElapsedTime();
-
-    box.rotation.x = t * 0.6;
-    box.rotation.y = t * 0.8;
-
-    sphere.position.y = 0.6 + Math.sin(t * 1.5) * 0.4;
-
-    torus.rotation.x = t * 0.5;
-    torus.rotation.z = t * 0.7;
-
-    pointLight.position.x = Math.sin(t * 0.8) * 4;
-    pointLight.position.z = Math.cos(t * 0.8) * 4;
-
+    controls.update();
     renderer.render(scene, camera);
   };
   animate();
@@ -119,6 +100,7 @@ onMounted(() => {
   onBeforeUnmount(() => {
     window.removeEventListener('resize', onResize);
     cancelAnimationFrame(animationId);
+    controls.dispose();
     renderer.dispose();
   });
 });
@@ -131,7 +113,12 @@ onMounted(() => {
 <style scoped>
 .three-canvas {
   display: block;
-  width: 100%;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
   height: 100vh;
+  margin: 0;
+  padding: 0;
 }
 </style>
