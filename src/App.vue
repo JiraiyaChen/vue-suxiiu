@@ -1,5 +1,5 @@
 <script setup>
-import ThreeScene from './components/ThreeScene.vue'
+import ThreeScene from './components/ThreeScene.vue';
 </script>
 
 <template>
