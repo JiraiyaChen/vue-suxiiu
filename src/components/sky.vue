@@ -10,7 +10,15 @@ import floorUrl from '../assets/showimg/southeast.jpg';
 import topUrl from '../assets/top.jpg';
 
 const canvasRef = ref(null);
+const viewingStand = ref(false);
+const isReturning = ref(false);
+const showIntro = ref(true);
+const introFading = ref(false);
 let renderer, animationId;
+
+function returnFromFocus() {
+  isReturning.value = true;
+}
 
 // 创建立体展牌：底座 + 支柱 + 画框 + 图片面板 + 金色铭牌
 function createStand(scene, texLoader, imgUrl, x, z, ry) {
@@ -69,6 +77,8 @@ function createStand(scene, texLoader, imgUrl, x, z, ry) {
   const fill = new THREE.PointLight(0xffe8c0, 3.0, 10);
   fill.position.set(x + frontX * 2.0, 1.2, z + frontZ * 2.0);
   scene.add(fill);
+
+  return group;
 }
 
 onMounted(() => {
@@ -209,12 +219,29 @@ onMounted(() => {
 
   // ── 四个立体展牌（两排正对玩家，ry=0 画面朝 +Z 方向）──
   const texLoader = new THREE.TextureLoader();
-  // 前排（靠近玩家出发点）
-  createStand(scene, texLoader, img1Url, -8, -2, 0);
-  createStand(scene, texLoader, img2Url, 8, -2, 0);
-  // 后排（靠近北墙）
-  createStand(scene, texLoader, img3Url, -8, -14, 0);
-  createStand(scene, texLoader, img4Url, 8, -14, 0);
+  const stands = [
+    { img: img1Url, x: -8, z: -2, ry: 0 },
+    { img: img2Url, x: 8, z: -2, ry: 0 },
+    { img: img3Url, x: -8, z: -14, ry: 0 },
+    { img: img4Url, x: 8, z: -14, ry: 0 },
+  ].map(({ img, x, z, ry }) => {
+    const group = createStand(scene, texLoader, img, x, z, ry);
+    const fx = Math.sin(ry),
+      fz = Math.cos(ry);
+    return {
+      group,
+      focusPos: new THREE.Vector3(x + fx * 5, 4.0, z + fz * 5),
+      focusLook: new THREE.Vector3(x, 4.95, z),
+    };
+  });
+  // hover / 点击检测
+  const raycaster = new THREE.Raycaster();
+  const mouseNDC = new THREE.Vector2(9999, 9999);
+  let hoveredStand = null;
+  // 焦点模式相机目标
+  const focusCamPos = new THREE.Vector3();
+  const focusLookPt = new THREE.Vector3();
+  const currentLook = new THREE.Vector3(0, 2, -1);
 
   // ── 第一人称控制参数 ──
   const EYE_HEIGHT = 1.7;
@@ -238,20 +265,86 @@ onMounted(() => {
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
 
-  // 指针锁定：点击画布后锁定鼠标，移动鼠标控制视角
+  // 鼠标左键拖拽旋转视角 + 鼠标位置用于 hover 检测
   const canvas = canvasRef.value;
-  const onClick = () => {
-    canvas.requestPointerLock();
-  };
-  canvas.addEventListener('click', onClick);
+  let isDragging = false;
+  let lastMouseX = 0,
+    lastMouseY = 0;
+  let mouseDownX = 0,
+    mouseDownY = 0,
+    didDrag = false;
 
-  const onMouseMove = (e) => {
-    if (document.pointerLockElement !== canvas) return;
-    yaw -= e.movementX * 0.002;
-    pitch -= e.movementY * 0.002;
-    pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, pitch));
+  const onMouseDown = (e) => {
+    if (e.button === 0) {
+      isDragging = true;
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+      mouseDownX = e.clientX;
+      mouseDownY = e.clientY;
+      didDrag = false;
+    }
   };
-  document.addEventListener('mousemove', onMouseMove);
+  const onMouseUp = (e) => {
+    if (e.button === 0 && !didDrag && !viewingStand.value) {
+      // 纯点击：检测展牌
+      raycaster.setFromCamera(mouseNDC, camera);
+      const meshes = stands.flatMap((s) => {
+        const a = [];
+        s.group.traverse((c) => {
+          if (c.isMesh) a.push(c);
+        });
+        return a;
+      });
+      const hits = raycaster.intersectObjects(meshes);
+      if (hits.length > 0) {
+        const hitObj = hits[0].object;
+        const hit = stands.find((s) => {
+          let o = hitObj;
+          while (o) {
+            if (o === s.group) return true;
+            o = o.parent;
+          }
+          return false;
+        });
+        if (hit) {
+          focusCamPos.copy(hit.focusPos);
+          focusLookPt.copy(hit.focusLook);
+          currentLook
+            .copy(camera.position)
+            .add(
+              new THREE.Vector3(
+                -Math.sin(yaw) * Math.cos(pitch),
+                Math.sin(pitch),
+                -Math.cos(yaw) * Math.cos(pitch)
+              )
+            );
+          viewingStand.value = true;
+        }
+      }
+    }
+    isDragging = false;
+  };
+  const onMouseMove = (e) => {
+    mouseNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouseNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    if (!isDragging) return;
+    const dx = e.clientX - mouseDownX,
+      dy = e.clientY - mouseDownY;
+    if (Math.sqrt(dx * dx + dy * dy) > 4) didDrag = true;
+    if (!viewingStand.value) {
+      yaw -= (e.clientX - lastMouseX) * 0.004;
+      pitch -= (e.clientY - lastMouseY) * 0.004;
+      pitch = Math.max(
+        -Math.PI / 2 + 0.05,
+        Math.min(Math.PI / 2 - 0.05, pitch)
+      );
+    }
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+  };
+  canvas.addEventListener('mousedown', onMouseDown);
+  window.addEventListener('mouseup', onMouseUp);
+  window.addEventListener('mousemove', onMouseMove);
 
   // 响应窗口大小
   const onResize = () => {
@@ -284,27 +377,96 @@ onMounted(() => {
     playerPos.x = Math.max(-BOUND_X, Math.min(BOUND_X, playerPos.x));
     playerPos.z = Math.max(-BOUND_Z, Math.min(BOUND_Z, playerPos.z));
 
-    // 相机置于眼睛位置
-    camera.position.set(playerPos.x, EYE_HEIGHT, playerPos.z);
+    // 相机更新
+    if (viewingStand.value) {
+      if (isReturning.value) {
+        // 平滑归位回玩家视角
+        const targetPos = new THREE.Vector3(
+          playerPos.x,
+          EYE_HEIGHT,
+          playerPos.z
+        );
+        const returnLook = new THREE.Vector3(
+          -Math.sin(yaw) * Math.cos(pitch),
+          Math.sin(pitch),
+          -Math.cos(yaw) * Math.cos(pitch)
+        ).add(targetPos);
+        camera.position.lerp(targetPos, 0.07);
+        currentLook.lerp(returnLook, 0.07);
+        camera.lookAt(currentLook);
+        if (camera.position.distanceTo(targetPos) < 0.08) {
+          isReturning.value = false;
+          viewingStand.value = false;
+        }
+      } else {
+        // 焦点模式：平滑移向展牌正前方
+        camera.position.lerp(focusCamPos, 0.06);
+        currentLook.lerp(focusLookPt, 0.06);
+        camera.lookAt(currentLook);
+      }
+    } else {
+      // 第一人称
+      camera.position.set(playerPos.x, EYE_HEIGHT, playerPos.z);
+      const lookDir = new THREE.Vector3(
+        -Math.sin(yaw) * Math.cos(pitch),
+        Math.sin(pitch),
+        -Math.cos(yaw) * Math.cos(pitch)
+      );
+      currentLook.copy(camera.position).add(lookDir);
+      camera.lookAt(currentLook);
+    }
 
-    // 根据 yaw + pitch 计算朝向
-    const lookDir = new THREE.Vector3(
-      -Math.sin(yaw) * Math.cos(pitch),
-      Math.sin(pitch),
-      -Math.cos(yaw) * Math.cos(pitch)
-    );
-    camera.lookAt(camera.position.clone().add(lookDir));
+    // ── 展牌 hover 检测与动画 ──
+    raycaster.setFromCamera(mouseNDC, camera);
+    const allMeshes = stands.flatMap((s) => {
+      const arr = [];
+      s.group.traverse((child) => {
+        if (child.isMesh) arr.push(child);
+      });
+      return arr;
+    });
+    const hits = raycaster.intersectObjects(allMeshes);
+    let newHovered = null;
+    if (hits.length > 0) {
+      const hitObj = hits[0].object;
+      newHovered = stands.find((s) => {
+        let o = hitObj;
+        while (o) {
+          if (o === s.group) return true;
+          o = o.parent;
+        }
+        return false;
+      });
+    }
+    stands.forEach((s) => {
+      const hovered = s === newHovered;
+      const ts = hovered ? 1.08 : 1.0;
+      s.group.scale.x += (ts - s.group.scale.x) * 0.1;
+      s.group.scale.y += (ts - s.group.scale.y) * 0.1;
+      s.group.scale.z += (ts - s.group.scale.z) * 0.1;
+    });
+    hoveredStand = newHovered;
+    canvas.style.cursor = newHovered ? 'pointer' : 'default';
 
     renderer.render(scene, camera);
   };
   animate();
 
+  // 启动动画：2s后开始淡出，再经 1s 过渡后移除
+  setTimeout(() => {
+    introFading.value = true;
+  }, 2000);
+  setTimeout(() => {
+    showIntro.value = false;
+  }, 3000);
+
   onBeforeUnmount(() => {
     window.removeEventListener('resize', onResize);
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
-    canvas.removeEventListener('click', onClick);
-    document.removeEventListener('mousemove', onMouseMove);
+    canvas.removeEventListener('mousedown', onMouseDown);
+    window.removeEventListener('mouseup', onMouseUp);
+    window.removeEventListener('mousemove', onMouseMove);
     cancelAnimationFrame(animationId);
     renderer.dispose();
   });
@@ -313,9 +475,27 @@ onMounted(() => {
 
 <template>
   <canvas ref="canvasRef" class="three-canvas" />
-  <div class="hint">
-    点击画面锁定鼠标 &nbsp;·&nbsp; WASD 移动 &nbsp;·&nbsp; 鼠标 旋转视角
-    &nbsp;·&nbsp; ESC 解锁
+
+  <Transition name="intro">
+    <div
+      v-if="showIntro"
+      class="intro-overlay"
+      :class="{ fading: introFading }"
+    >
+      <div class="intro-title">苏绣博物馆</div>
+      <div class="intro-sub">周庄展览·斋甲天下</div>
+    </div>
+  </Transition>
+  <button
+    v-if="viewingStand && !isReturning"
+    class="return-btn"
+    @click="returnFromFocus"
+  >
+    ← 返回
+  </button>
+  <div v-if="!viewingStand" class="hint">
+    WASD 移动 &nbsp;·&nbsp; 鼠标左键拖拽 旋转视角 &nbsp;·&nbsp; 点击展牌
+    聚焦视角
   </div>
 </template>
 
@@ -341,5 +521,74 @@ onMounted(() => {
   font-size: 13px;
   pointer-events: none;
   white-space: nowrap;
+}
+
+.return-btn {
+  position: fixed;
+  bottom: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 12, 4, 0.88);
+  color: #f0d890;
+  border: 1.5px solid #b8860b;
+  padding: 11px 32px;
+  border-radius: 26px;
+  font-size: 15px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    transform 0.15s;
+  white-space: nowrap;
+}
+.return-btn:hover {
+  background: rgba(60, 38, 8, 0.96);
+  transform: translateX(-50%) scale(1.04);
+}
+
+/* 启动动画 */
+.intro-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #0a0600;
+  transition: opacity 1s ease;
+  opacity: 1;
+}
+.intro-overlay.fading {
+  opacity: 0;
+}
+.intro-title {
+  font-size: clamp(42px, 8vw, 88px);
+  font-family: 'STKaiti', '楷体', 'serif';
+  color: #f0d890;
+  letter-spacing: 0.25em;
+  text-shadow:
+    0 0 40px rgba(200, 150, 0, 0.7),
+    0 2px 8px rgba(0, 0, 0, 0.8);
+  animation: titleIn 1.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.intro-sub {
+  margin-top: 18px;
+  font-size: clamp(14px, 2vw, 20px);
+  font-family: 'STKaiti', '楷体', serif;
+  color: #c8a060;
+  letter-spacing: 0.4em;
+  opacity: 0.85;
+  animation: titleIn 1.6s 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes titleIn {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 </style>
