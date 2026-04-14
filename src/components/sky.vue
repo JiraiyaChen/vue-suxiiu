@@ -35,7 +35,12 @@ function initAudio() {
   masterGain.gain.linearRampToValueAtTime(0.38, audioCtx.currentTime + 3);
 
   // 低音肃（多个正弦波铠声）
-  [[130.81, 0.10], [196.00, 0.07], [261.63, 0.05], [130.81 * 1.004, 0.06]].forEach(([freq, vol]) => {
+  [
+    [130.81, 0.1],
+    [196.0, 0.07],
+    [261.63, 0.05],
+    [130.81 * 1.004, 0.06],
+  ].forEach(([freq, vol]) => {
     const osc = audioCtx.createOscillator();
     const g = audioCtx.createGain();
     osc.type = 'sine';
@@ -48,18 +53,22 @@ function initAudio() {
 
   // 五声旋律调度器
   //  C五声音阶: C4 D4 E4 G4 A4 C5 D5 E5
-  const pentatonic = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25];
-  const pattern    = [0, 2, 4, 2, 5, 4, 2, 1, 0, 3, 5, 3, 6, 4, 2, 0,
-                      1, 3, 5, 4, 7, 5, 3, 2, 1, 4, 6, 4, 5, 3, 1, 0];
+  const pentatonic = [
+    261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25,
+  ];
+  const pattern = [
+    0, 2, 4, 2, 5, 4, 2, 1, 0, 3, 5, 3, 6, 4, 2, 0, 1, 3, 5, 4, 7, 5, 3, 2, 1,
+    4, 6, 4, 5, 3, 1, 0,
+  ];
   const STEP = 0.72;
   noteTime = audioCtx.currentTime + 1.0;
-  noteIdx  = 0;
+  noteIdx = 0;
 
   function tick() {
     while (noteTime < audioCtx.currentTime + 2.0) {
       const freq = pentatonic[pattern[noteIdx % pattern.length]];
-      const osc  = audioCtx.createOscillator();
-      const g    = audioCtx.createGain();
+      const osc = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
       osc.type = 'triangle';
       osc.frequency.value = freq;
       g.gain.setValueAtTime(0, noteTime);
@@ -91,11 +100,18 @@ function enterMuseum() {
 }
 
 function toggleMusic() {
-  if (!audioCtx) { initAudio(); return; }
+  if (!audioCtx) {
+    initAudio();
+    return;
+  }
   if (audioCtx.state === 'running') {
-    audioCtx.suspend().then(() => { musicPlaying.value = false; });
+    audioCtx.suspend().then(() => {
+      musicPlaying.value = false;
+    });
   } else {
-    audioCtx.resume().then(() => { musicPlaying.value = true; });
+    audioCtx.resume().then(() => {
+      musicPlaying.value = true;
+    });
   }
 }
 
@@ -842,7 +858,10 @@ onMounted(() => {
     cancelAnimationFrame(animationId);
     renderer.dispose();
     clearTimeout(schedulerTimer);
-    if (audioCtx) { audioCtx.close(); audioCtx = null; }
+    if (audioCtx) {
+      audioCtx.close();
+      audioCtx = null;
+    }
   });
 });
 </script>
