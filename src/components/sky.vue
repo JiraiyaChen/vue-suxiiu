@@ -5,6 +5,9 @@ import img1Url from '../assets/showimg/1.jpg';
 import img2Url from '../assets/showimg/2.jpg';
 import img3Url from '../assets/showimg/3.jpg';
 import img4Url from '../assets/showimg/4.jpg';
+import woodUrl from '../assets/showimg/木制.jpg';
+import floorUrl from '../assets/showimg/southeast.jpg';
+import topUrl from '../assets/top.jpg';
 
 const canvasRef = ref(null);
 let renderer, animationId;
@@ -33,10 +36,10 @@ function createStand(scene, texLoader, imgUrl, x, z, ry) {
   frame.castShadow = true;
   group.add(frame);
 
-  // 图片面板（贴在画框正面）
+  // 图片面板（MeshBasicMaterial 不受光照影响，原色显示）
   const imgPanel = new THREE.Mesh(
     new THREE.PlaneGeometry(3.87, 4.54),
-    new THREE.MeshLambertMaterial({ map: texLoader.load(imgUrl) })
+    new THREE.MeshBasicMaterial({ map: texLoader.load(imgUrl) })
   );
   imgPanel.position.set(0, 4.95, 0.123);
   group.add(imgPanel);
@@ -56,14 +59,14 @@ function createStand(scene, texLoader, imgUrl, x, z, ry) {
   // 展牌聚光灯（从正面斜上方打向画框）
   const frontX = Math.sin(ry),
     frontZ = Math.cos(ry);
-  const spot = new THREE.SpotLight(0xfff8e0, 6.0, 20, Math.PI / 7, 0.4);
+  const spot = new THREE.SpotLight(0xffffff, 12, 25, Math.PI / 6, 0.3);
   spot.position.set(x + frontX * 3.5, 8.5, z + frontZ * 3.5);
   spot.target.position.set(x, 4.95, z);
   scene.add(spot);
   scene.add(spot.target);
 
   // 展牌脚下远距补光（温暖点光源）
-  const fill = new THREE.PointLight(0xffe8c0, 1.8, 8);
+  const fill = new THREE.PointLight(0xffe8c0, 3.0, 10);
   fill.position.set(x + frontX * 2.0, 1.2, z + frontZ * 2.0);
   scene.add(fill);
 }
@@ -95,12 +98,26 @@ onMounted(() => {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   // ── 博物馆建筑 ──
-  const wallMat = new THREE.MeshLambertMaterial({
-    color: 0xf2ede2,
-    side: THREE.FrontSide,
-  });
-  const floorMat = new THREE.MeshLambertMaterial({ color: 0xddd5c4 });
-  const ceilingMat = new THREE.MeshLambertMaterial({ color: 0xfafafa });
+  // 每面墙单独创建材质，按实际尺寸设置纹理重复，避免拉伸
+  const TILE = 3; // 每 3 个单位重复一次纹理
+  const wallTexLoader = new THREE.TextureLoader();
+  function makeWallMat(w, h) {
+    const tex = wallTexLoader.load(woodUrl);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(w / TILE, h / TILE);
+    return new THREE.MeshLambertMaterial({ map: tex, side: THREE.FrontSide });
+  }
+  const floorTex = wallTexLoader.load(floorUrl);
+  floorTex.wrapS = THREE.RepeatWrapping;
+  floorTex.wrapT = THREE.RepeatWrapping;
+  floorTex.repeat.set(ROOM_W / TILE, ROOM_D / TILE);
+  const floorMat = new THREE.MeshLambertMaterial({ map: floorTex });
+  const ceilingTex = wallTexLoader.load(topUrl);
+  ceilingTex.wrapS = THREE.RepeatWrapping;
+  ceilingTex.wrapT = THREE.RepeatWrapping;
+  ceilingTex.repeat.set(ROOM_W / TILE, ROOM_D / TILE);
+  const ceilingMat = new THREE.MeshLambertMaterial({ map: ceilingTex });
 
   // 地面
   const floor = new THREE.Mesh(
@@ -120,7 +137,7 @@ onMounted(() => {
   ceiling.position.y = ROOM_H;
   scene.add(ceiling);
 
-  // 四面墙
+  // 四面墙（每面独立材质）
   [
     { w: ROOM_W, h: ROOM_H, pos: [0, ROOM_H / 2, -ROOM_D / 2], ry: 0 },
     { w: ROOM_W, h: ROOM_H, pos: [0, ROOM_H / 2, ROOM_D / 2], ry: Math.PI },
@@ -137,7 +154,7 @@ onMounted(() => {
       ry: Math.PI / 2,
     },
   ].forEach(({ w, h, pos, ry }) => {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), makeWallMat(w, h));
     m.position.set(...pos);
     m.rotation.y = ry;
     scene.add(m);
