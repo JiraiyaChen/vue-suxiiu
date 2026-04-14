@@ -16,10 +16,87 @@ const viewingStand = ref(false);
 const isReturning = ref(false);
 const showIntro = ref(true);
 const introFading = ref(false);
+const musicPlaying = ref(false);
+let audioCtx = null;
+let masterGain = null;
+let schedulerTimer = null;
+let noteIdx = 0;
+let noteTime = 0;
 let renderer, animationId;
+
+// 五声调式环境音乐（Web Audio API 程序化生成）
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0;
+  masterGain.connect(audioCtx.destination);
+  // 淡入
+  masterGain.gain.linearRampToValueAtTime(0.38, audioCtx.currentTime + 3);
+
+  // 低音肃（多个正弦波铠声）
+  [[130.81, 0.10], [196.00, 0.07], [261.63, 0.05], [130.81 * 1.004, 0.06]].forEach(([freq, vol]) => {
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    g.gain.value = vol;
+    osc.connect(g);
+    g.connect(masterGain);
+    osc.start();
+  });
+
+  // 五声旋律调度器
+  //  C五声音阶: C4 D4 E4 G4 A4 C5 D5 E5
+  const pentatonic = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25];
+  const pattern    = [0, 2, 4, 2, 5, 4, 2, 1, 0, 3, 5, 3, 6, 4, 2, 0,
+                      1, 3, 5, 4, 7, 5, 3, 2, 1, 4, 6, 4, 5, 3, 1, 0];
+  const STEP = 0.72;
+  noteTime = audioCtx.currentTime + 1.0;
+  noteIdx  = 0;
+
+  function tick() {
+    while (noteTime < audioCtx.currentTime + 2.0) {
+      const freq = pentatonic[pattern[noteIdx % pattern.length]];
+      const osc  = audioCtx.createOscillator();
+      const g    = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0, noteTime);
+      g.gain.linearRampToValueAtTime(0.14, noteTime + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.001, noteTime + STEP * 0.88);
+      osc.connect(g);
+      g.connect(masterGain);
+      osc.start(noteTime);
+      osc.stop(noteTime + STEP);
+      noteTime += STEP;
+      noteIdx++;
+    }
+    schedulerTimer = setTimeout(tick, 80);
+  }
+  tick();
+  musicPlaying.value = true;
+}
 
 function returnFromFocus() {
   isReturning.value = true;
+}
+
+function enterMuseum() {
+  introFading.value = true;
+  setTimeout(() => {
+    showIntro.value = false;
+  }, 1000);
+  initAudio();
+}
+
+function toggleMusic() {
+  if (!audioCtx) { initAudio(); return; }
+  if (audioCtx.state === 'running') {
+    audioCtx.suspend().then(() => { musicPlaying.value = false; });
+  } else {
+    audioCtx.resume().then(() => { musicPlaying.value = true; });
+  }
 }
 
 // 创建立体展牌：底座 + 支柱 + 画框 + 图片面板 + 金色铭牌
@@ -755,14 +832,6 @@ onMounted(() => {
   };
   animate();
 
-  // 启动动画：2s后开始淡出，再经 1s 过渡后移除
-  setTimeout(() => {
-    introFading.value = true;
-  }, 2000);
-  setTimeout(() => {
-    showIntro.value = false;
-  }, 3000);
-
   onBeforeUnmount(() => {
     window.removeEventListener('resize', onResize);
     window.removeEventListener('keydown', onKeyDown);
@@ -772,6 +841,8 @@ onMounted(() => {
     window.removeEventListener('mousemove', onMouseMove);
     cancelAnimationFrame(animationId);
     renderer.dispose();
+    clearTimeout(schedulerTimer);
+    if (audioCtx) { audioCtx.close(); audioCtx = null; }
   });
 });
 </script>
@@ -787,6 +858,7 @@ onMounted(() => {
     >
       <div class="intro-title">苏绣博物馆</div>
       <div class="intro-sub">周庄展览·斋甲天下</div>
+      <button class="enter-btn" @click="enterMuseum">点击进入展馆</button>
     </div>
   </Transition>
   <button
@@ -800,6 +872,14 @@ onMounted(() => {
     WASD 移动 &nbsp;·&nbsp; 鼠标左键拖拽 旋转视角 &nbsp;·&nbsp; 点击展牌
     聚焦视角
   </div>
+  <button
+    class="music-btn"
+    @click="toggleMusic"
+    :title="musicPlaying ? '暂停音乐' : '播放音乐'"
+  >
+    <span v-if="musicPlaying">🔊</span>
+    <span v-else>🔇</span>
+  </button>
 </template>
 
 <style scoped>
@@ -849,6 +929,35 @@ onMounted(() => {
   transform: translateX(-50%) scale(1.04);
 }
 
+.music-btn {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(20, 12, 4, 0.75);
+  border: 1.5px solid #b8860b;
+  color: #f0d890;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.2s,
+    transform 0.15s,
+    box-shadow 0.2s;
+  box-shadow: 0 0 10px rgba(200, 150, 0, 0.2);
+  z-index: 50;
+  line-height: 1;
+}
+.music-btn:hover {
+  background: rgba(60, 38, 8, 0.95);
+  transform: scale(1.1);
+  box-shadow: 0 0 18px rgba(200, 150, 0, 0.45);
+}
+
 /* 启动动画 */
 .intro-overlay {
   position: fixed;
@@ -883,6 +992,29 @@ onMounted(() => {
   letter-spacing: 0.4em;
   opacity: 0.85;
   animation: titleIn 1.6s 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.enter-btn {
+  margin-top: 48px;
+  padding: 14px 48px;
+  background: transparent;
+  color: #f0d890;
+  border: 1.5px solid #b8860b;
+  border-radius: 32px;
+  font-size: clamp(14px, 1.6vw, 18px);
+  font-family: 'STKaiti', '楷体', serif;
+  letter-spacing: 0.3em;
+  cursor: pointer;
+  animation: titleIn 2s 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  transition:
+    background 0.25s,
+    transform 0.18s,
+    box-shadow 0.25s;
+  box-shadow: 0 0 18px rgba(200, 150, 0, 0.18);
+}
+.enter-btn:hover {
+  background: rgba(184, 134, 11, 0.18);
+  transform: scale(1.06);
+  box-shadow: 0 0 32px rgba(200, 150, 0, 0.45);
 }
 @keyframes titleIn {
   from {
